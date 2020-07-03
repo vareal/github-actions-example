@@ -1,0 +1,143 @@
+name: CI
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - 'release/**'
+  pull_request:
+
+jobs:
+  main:
+    name: Build
+    runs-on: ubuntu-latest
+
+    # Choose services used in project
+    services:
+      postgres:
+        image: postgres:11
+        env:
+          POSTGRES_USER: ""
+          POSTGRES_DB: ""
+          POSTGRES_PASSWORD: ""
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+        - 3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+      redis:
+        image: redis
+        ports: ['6379:6379']
+        options: --entrypoint redis-server
+      elasticsearch:
+        image: elasticsearch:6.8.3
+        ports:
+        - 9200/tcp
+        options: >-
+          -e="discovery.type=single-node"
+          --health-cmd="curl http://localhost:9200/_cluster/health"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Ruby
+        uses: actions/setup-ruby@v1
+        with:
+          ruby-version: '2.6.3'
+
+      - name: Set up Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: 10.13.0
+
+      # Install PostgreSQL or MySQL
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get -yqq install libpq-dev
+
+      - name: Install MySQL client
+        run: |
+          sudo apt-get install -y mysql-client libmysqlclient-dev
+          mysql --host 127.0.0.1 --port ${{ job.services.mysql.ports[3306] }} -uroot -proot -e "SHOW GRANTS FOR 'root'@'localhost'"
+          mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql --host 127.0.0.1 --port ${{ job.services.mysql.ports[3306] }} -uroot -proot mysql
+ 
+      - name: Verify Elasticsearch connection from host
+        env:
+          ELASTIC_SEARCH_URL: http://localhost:${{ job.services.elasticsearch.ports[9200] }}
+        run: |
+          echo $ELASTIC_SEARCH_URL
+          curl -fsSL "$ELASTIC_SEARCH_URL/_cat/health?h=status"
+
+      - uses: actions/cache@v1
+        with:
+          path: vendor/bundle
+          key: ${{ runner.os }}-gem-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gem-
+
+      - name: Install dependencies
+        run: |
+          sed -in 's/2.6.5/2.6.3/g' .ruby-version
+          sed -in 's/2.6.5/2.6.3/g' Gemfile
+          sed -in 's/2.6.5p114/2.6.3/g' Gemfile.lock
+          cat Gemfile
+          gem install bundler
+          bundle config path vendor/bundle
+          bundle install --jobs 4 --retry 3
+          yarn install
+          cp config/database.yml.example config/database.yml
+
+      # Setup environment variables following database.yml
+      - name: Setup test database
+        env:
+          RAILS_ENV: test
+          POSTGRES_USER: ""
+          POSTGRES_PASSWORD: ""
+          POSTGRES_HOST: localhost
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+        run: |
+          bin/rails db:create
+          bin/rails db:migrate
+
+      - name: Run Rubocop
+        run: bundle exec rubocop
+
+      - name: Run tests
+        run: bundle exec rspec
+
+      - name: Setup for robotframework test
+        run: |
+          mkdir -p ${{ github.workspace }}/reports
+          sudo chmod -R 777 ${{ github.workspace }}/reports
+          bin/rails s -b 0.0.0.0 -p 3000 -d
+
+      - name: Run Robot Framework test
+        uses: joonvena/robotframework-docker-action@v0.1
+        env:
+          BROWSER: chrome
+          ROBOT_TESTS_DIR: ${{ github.workspace }}/robot_tests
+          ROBOT_REPORTS_DIR: ${{ github.workspace }}/reports
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v1
+        if: always()
+        with:
+          name: reports
+          path: ${{ github.workspace }}/reports
