@@ -1,0 +1,1 @@
+  [1m[35m (417.2ms)[0m  [1m[35mCREATE DATABASE "sample_postgres_test" ENCODING = 'unicode'[0m
