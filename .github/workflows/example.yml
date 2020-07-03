@@ -1,4 +1,4 @@
-name: CI
+name: example
 on:
   push:
     branches:
@@ -59,7 +59,7 @@ jobs:
       - name: Set up Ruby
         uses: actions/setup-ruby@v1
         with:
-          ruby-version: '2.6'
+          ruby-version: '2.6.6'
 
       - name: Set up Node
         uses: actions/setup-node@v1
@@ -107,8 +107,8 @@ jobs:
       - name: Setup test database
         env:
           RAILS_ENV: test
-          POSTGRES_USER: ""
-          POSTGRES_PASSWORD: ""
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_HOST: localhost
           MYSQL_USER: root
           MYSQL_PASSWORD: root
@@ -117,7 +117,7 @@ jobs:
           bin/rails db:migrate
 
       - name: Run Rubocop
-        run: bundle exec rubocop
+        run: bundle exec rubocop app/
 
       - name: Run tests
         run: bundle exec rspec
