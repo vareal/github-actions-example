@@ -117,7 +117,7 @@ jobs:
           bin/rails db:migrate
 
       - name: Run Rubocop
-        run: bundle exec rubocop
+        run: bundle exec rubocop app/
 
       - name: Run tests
         run: bundle exec rspec
